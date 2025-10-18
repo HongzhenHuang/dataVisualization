@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Interactive World Map</title>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  body {
+    font-family: 'Roboto', sans-serif;
+    background: #f5f7fa;
+    margin: 0;
+    padding: 0;
+    color: #333;
+  }
+
+  h1 {
+    text-align: center;
+    margin-top: 20px;
+    font-weight: 700;
+    color: #222;
+  }
+
+  #controls {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin: 20px auto;
+    padding: 15px 25px;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    max-width: 950px;
+  }
+
+  label {
+    font-weight: 500;
+    margin-right: 5px;
+  }
+
+  select, input[type=range], button, input[type=file] {
+    padding: 6px 10px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+  }
+
+  button {
+    cursor: pointer;
+    background: linear-gradient(90deg,#E15759,#B22222);
+    color: #fff;
+    border: none;
+    font-weight: 500;
+    transition: 0.3s;
+  }
+
+  button:hover {
+    background: linear-gradient(90deg,#B22222,#800000);
+  }
+
+  /* ✅ 统一滑块样式，让左右对齐 */
+  .slider-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 300px;
+  }
+
+  input[type=range] {
+    flex: 1;
+    height: 6px;
+    background: #ddd;
+    border-radius: 5px;
+    outline: none;
+    padding: 0; /* ✅ 新增这一行来移除内边距 */
+  }
+
+  #yearLabel {
+    font-weight: 700;
+    width: 40px;
+    text-align: center;
+  }
+
+  #map {
+    width: 90%;
+    height: 650px;
+    margin: 30px auto;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+    padding: 10px;
+  }
+
+  @media(max-width:768px){
+    #controls{
+      flex-direction: column;
+      align-items: center;
+    }
+    .slider-container{min-width: 100%;}
+  }
+</style>
+</head>
+<body>
+
+<h1>全球指标互动地图</h1>
+
+<div id="controls">
+  <label for="measureSelect">选择指标：</label>
+  <select id="measureSelect">
+    <option>Life expectancy</option>
+    <option>Adult Mortality</option>
+    <option>infant deaths</option>
+    <option>Alcohol</option>
+    <option>percentage expenditure</option>
+    <option>Hepatitis B</option>
+    <option>Measles</option>
+    <option>BMI</option>
+    <option>under-five deaths</option>
+    <option>Polio</option>
+    <option>Total expenditure</option>
+    <option>Diphtheria</option>
+    <option>HIV/AIDS</option>
+    <option>GDP</option>
+    <option>Population</option>
+    <option>thinness 1-19 years</option>
+    <option>thinness 5-9 years</option>
+    <option>Income composition of resources</option>
+    <option>Schooling</option>
+  </select>
+
+  <div class="slider-container">
+    <label for="yearSlider">年份：</label>
+    <input type="range" id="yearSlider" min="2000" max="2015" step="1" value="2015">
+    <span id="yearLabel">2015</span>
+  </div>
+
+  <button id="playButton">▶ Play</button>
+  
+  <input type="file" id="csvFile" accept=".csv">
+</div>
+
+<div id="map"></div>
+
+<script>
+// 数据初始化
+let dataMap = {}, countries = [], isoCodes = [];
+let currentYear = 2015, currentMeasure = "Life expectancy", playInterval;
+
+// ISO3 对照表（省略部分）
+const iso3Map = {
+"Afghanistan":"AFG","Albania":"ALB","Algeria":"DZA","Angola":"AGO","Antigua and Barbuda":"ATG",
+"Argentina":"ARG","Armenia":"ARM","Australia":"AUS","Austria":"AUT","Azerbaijan":"AZE",
+"Bahamas":"BHS","Bahrain":"BHR","Bangladesh":"BGD","Barbados":"BRB","Belarus":"BLR",
+"Belgium":"BEL","Belize":"BLZ","Benin":"BEN","Bhutan":"BTN","Bolivia (Plurinational State of)":"BOL",
+"Bosnia and Herzegovina":"BIH","Botswana":"BWA","Brazil":"BRA","Brunei Darussalam":"BRN","Bulgaria":"BGR",
+"Burkina Faso":"BFA","Burundi":"BDI","Côte d'Ivoire":"CIV","Cabo Verde":"CPV","Cambodia":"KHM",
+"Cameroon":"CMR","Canada":"CAN","Central African Republic":"CAF","Chad":"TCD","Chile":"CHL","China":"CHN",
+"Colombia":"COL","Comoros":"COM","Congo":"COG","Costa Rica":"CRI","Croatia":"HRV","Cuba":"CUB","Cyprus":"CYP",
+"Czechia":"CZE","Democratic People's Republic of Korea":"PRK","Democratic Republic of the Congo":"COD","Denmark":"DNK",
+"Djibouti":"DJI","Dominican Republic":"DOM","Ecuador":"ECU","Egypt":"EGY","El Salvador":"SLV","Equatorial Guinea":"GNQ",
+"Eritrea":"ERI","Estonia":"EST","Ethiopia":"ETH","Fiji":"FJI","Finland":"FIN","France":"FRA","Gabon":"GAB",
+"Gambia":"GMB","Georgia":"GEO","Germany":"DEU","Ghana":"GHA","Greece":"GRC","Grenada":"GRD","Guatemala":"GTM",
+"Guinea":"GIN","Guinea-Bissau":"GNB","Guyana":"GUY","Haiti":"HTI","Honduras":"HND","Hungary":"HUN",
+"Iceland":"ISL","India":"IND","Indonesia":"IDN","Iran (Islamic Republic of)":"IRN","Iraq":"IRQ","Ireland":"IRL",
+"Israel":"ISR","Italy":"ITA","Jamaica":"JAM","Japan":"JPN","Jordan":"JOR","Kazakhstan":"KAZ","Kenya":"KEN",
+"Kiribati":"KIR","Kuwait":"KWT","Kyrgyzstan":"KGZ","Lao People's Democratic Republic":"LAO","Latvia":"LVA",
+"Lebanon":"LBN","Lesotho":"LSO","Liberia":"LBR","Libya":"LBY","Lithuania":"LTU","Luxembourg":"LUX","Madagascar":"MDG",
+"Malawi":"MWI","Malaysia":"MYS","Maldives":"MDV","Mali":"MLI","Malta":"MLT","Mauritania":"MRT","Mauritius":"MUS",
+"Mexico":"MEX","Micronesia (Federated States of)":"FSM","Mongolia":"MNG","Montenegro":"MNE","Morocco":"MAR",
+"Mozambique":"MOZ","Myanmar":"MMR","Namibia":"NAM","Nepal":"NPL","Netherlands":"NLD","New Zealand":"NZL",
+"Nicaragua":"NIC","Niger":"NER","Nigeria":"NGA","Norway":"NOR","Oman":"OMN","Pakistan":"PAK","Panama":"PAN",
+"Papua New Guinea":"PNG","Paraguay":"PRY","Peru":"PER","Philippines":"PHL","Poland":"POL","Portugal":"PRT",
+"Qatar":"QAT","Republic of Korea":"KOR","Republic of Moldova":"MDA","Romania":"ROU","Russian Federation":"RUS",
+"Rwanda":"RWA","Saint Lucia":"LCA","Saint Vincent and the Grenadines":"VCT","Samoa":"WSM","Sao Tome and Principe":"STP",
+"Saudi Arabia":"SAU","Senegal":"SEN","Serbia":"SRB","Seychelles":"SYC","Sierra Leone":"SLE","Singapore":"SGP",
+"Slovakia":"SVK","Slovenia":"SVN","Solomon Islands":"SLB","Somalia":"SOM","South Africa":"ZAF","South Sudan":"SSD",
+"Spain":"ESP","Sri Lanka":"LKA","Sudan":"SDN","Suriname":"SUR","Swaziland":"SWZ","Sweden":"SWE","Switzerland":"CHE",
+"Syrian Arab Republic":"SYR","Tajikistan":"TJK","Thailand":"THA","The former Yugoslav republic of Macedonia":"MKD",
+"Timor-Leste":"TLS","Togo":"TGO","Tonga":"TON","Trinidad and Tobago":"TTO","Tunisia":"TUN","Turkey":"TUR",
+"Turkmenistan":"TKM","Uganda":"UGA","Ukraine":"UKR","United Arab Emirates":"ARE",
+"United Kingdom of Great Britain and Northern Ireland":"GBR",
+"United Republic of Tanzania":"TZA","United States of America":"USA","Uruguay":"URY","Uzbekistan":"UZB",
+"Vanuatu":"VUT","Venezuela (Bolivarian Republic of)":"VEN","Viet Nam":"VNM","Yemen":"YEM","Zambia":"ZMB"
+};
+
+// CSV 文件读取
+document.getElementById('csvFile').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  Papa.parse(file,{header:true,dynamicTyping:true,complete: results=>processData(results.data)});
+});
+
+// 数据处理
+function processData(rows){
+  const measures = Array.from(document.getElementById("measureSelect").options).map(o=>o.value);
+  dataMap = {};
+  measures.forEach(m=> dataMap[m]={});
+  rows.forEach(row=>{
+    const year = row.Year;
+    measures.forEach(m=>{
+      if(!dataMap[m][year]) dataMap[m][year]={};
+      dataMap[m][year][row.Country]=row[m];
+    });
+  });
+  countries = Object.keys(dataMap["Life expectancy"][currentYear]);
+  isoCodes = countries.map(c=>iso3Map[c]||"");
+  updateMap();
+}
+
+// 绘制地图
+function updateMap(){
+  if(!dataMap[currentMeasure] || !dataMap[currentMeasure][currentYear]) return;
+  const values = countries.map(c=>dataMap[currentMeasure][currentYear][c]);
+  const trace = {
+    type: 'choropleth',
+    locationmode: 'ISO-3',
+    locations: isoCodes,
+    z: values,
+    text: countries.map((c,i)=>`${c}: ${values[i]}`),
+    colorscale: [[0,'#FFFFFF'],[1,'#B22222']],
+    colorbar: {title: currentMeasure},
+    marker: {line: {color:'rgb(180,180,180)', width:0.5}}
+  };
+  const layout = {
+    title: `${currentMeasure} - ${currentYear}`,
+    geo: {projection:{type:'natural earth'}}
+  };
+  Plotly.newPlot('map',[trace],layout,{responsive:true});
+}
+
+// 控件交互
+document.getElementById("measureSelect").addEventListener("change", function(){
+  currentMeasure = this.value; updateMap();
+});
+
+document.getElementById("yearSlider").addEventListener("input", function(){
+  currentYear=parseInt(this.value);
+  document.getElementById("yearLabel").textContent=currentYear;
+  updateMap();
+});
+
+document.getElementById("playButton").addEventListener("click", function(){
+  if(playInterval){ clearInterval(playInterval); playInterval=null; this.textContent="▶ Play"; }
+  else{
+    this.textContent="⏸ Pause";
+    playInterval=setInterval(()=>{
+      currentYear++; if(currentYear>2015) currentYear=2000;
+      document.getElementById("yearSlider").value=currentYear;
+      document.getElementById("yearLabel").textContent=currentYear;
+      updateMap();
+    },1000);
+  }
+});
+</script>
+
+</body>
+</html>
